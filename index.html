@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Onion Spoilage Monitor</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- Google Fonts: Space Mono (monospaced, industrial feel) + Syne (display) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet"/>
+
+  <style>
+    /* ─── CSS VARIABLES ─────────────────────────────────── */
+    :root {
+      --bg:         #2a2f30;
+      --surface:    #191e1d;
+      --border:     #1e2b27;
+      --muted:      #3a4d47;
+      --text:       #d4e8e1;
+      --accent:     #22c987;
+      --warn:       #f59e0b;
+      --danger:     #ef4444;
+      --gray-badge: #174cb7;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      min-height: 80vh;
+    }
+
+    /* ─── SCANLINE TEXTURE OVERLAY ──────────────────────── */
+    body::before {
+      content: '';
+      pointer-events: none;
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 3px,
+        rgba(0,0,0,0.08) 3px,
+        rgba(0,0,0,0.08) 4px
+      );
+      z-index: 999;
+    }
+
+    /* ─── HEADER ─────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 1.25rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    header h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--accent);
+    }
+
+    header h1 span { color: var(--text); }
+
+    /* ─── STATUS CARD ────────────────────────────────────── */
+    .status-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem 2rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* animated left accent bar */
+    .status-card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 4px;
+      background: var(--accent);
+      transition: background 0.5s ease;
+      border-radius: 4px 0 0 4px;
+    }
+    .status-card.spoiled::before  { background: var(--danger); }
+    .status-card.fresh::before    { background: var(--accent); }
+    .status-card.no-onion::before { background: var(--gray-badge); }
+
+    /* ─── METRIC TILES ───────────────────────────────────── */
+    .metric-tile {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .metric-tile .label {
+      font-size: 0.65rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .metric-tile .value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1;
+    }
+
+    .metric-tile .unit {
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    /* ─── STATUS BADGE ───────────────────────────────────── */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.35rem 1rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      transition: background 0.4s, color 0.4s;
+    }
+
+    .badge-no-onion { background: rgba(107,114,128,0.2); color: var(--gray-badge); border: 1px solid var(--gray-badge); }
+    .badge-fresh    { background: rgba(34,201,135,0.15); color: var(--accent);     border: 1px solid var(--accent); }
+    .badge-spoiled  { background: rgba(239,68,68,0.15);  color: var(--danger);     border: 1px solid var(--danger); }
+
+    /* pulsing dot */
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .badge-no-onion .dot { background: var(--gray-badge); }
+    .badge-fresh    .dot { background: var(--accent); animation: pulse 1.5s infinite; }
+    .badge-spoiled  .dot { background: var(--danger); animation: pulse 0.8s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    /* ─── CHART CARD ─────────────────────────────────────── */
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+    }
+
+    .chart-card h3 {
+      font-family: 'Syne', sans-serif;
+      font-size: 0.85rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    .chart-card canvas { display: block; width: 100% !important; }
+
+    /* ─── ALERT BANNER ───────────────────────────────────── */
+    #alert-banner {
+      display: none;
+      background: rgba(239,68,68,0.1);
+      border: 1px solid var(--danger);
+      border-radius: 8px;
+      padding: 0.75rem 1.25rem;
+      color: var(--danger);
+      font-size: 0.85rem;
+      letter-spacing: 0.05em;
+      animation: blink-border 1s infinite;
+    }
+
+    #alert-banner.active { display: flex; align-items: center; gap: 0.75rem; }
+
+    @keyframes blink-border {
+      0%, 100% { border-color: var(--danger); }
+      50%       { border-color: transparent; }
+    }
+
+    /* ─── LAST UPDATED ───────────────────────────────────── */
+    #last-updated {
+      font-size: 0.7rem;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+    }
+
+    /* ─── RESPONSIVE ─────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .charts-grid { grid-template-columns: 1fr !important; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ══════════════════ HEADER ══════════════════ -->
+  <header>
+    <h1>🧅 <span>Onion</span> Spoilage <span>Detector</span></h1>
+    <span id="last-updated">Waiting for data...</span>
+  </header>
+
+  <!-- ══════════════════ MAIN CONTENT ══════════════════ -->
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- ── STATUS CARD ── -->
+    <div class="status-card" id="status-card">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-5">
+        <div>
+          <p class="text-xs tracking-widest uppercase mb-1" style="color:var(--muted)">Current Status</p>
+          <span class="status-badge badge-no-onion" id="status-badge">
+            <span class="dot"></span>
+            <span id="status-text">—</span>
+          </span>
+        </div>
+        <!-- Alert banner -->
+        <div id="alert-banner">
+          <span>⚠</span>
+          <span>SPOILAGE DETECTED — Check your onion immediately! and segregate onions</span>
+        </div>
+      </div>
+
+      <!-- Metric tiles -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="metric-tile">
+          <span class="label">Temperature</span>
+          <span class="value" id="val-temp">—</span>
+          <span class="unit">°C</span>
+        </div>
+        <div class="metric-tile">
+          <span class="label">Humidity</span>
+          <span class="value" id="val-humid">—</span>
+          <span class="unit">%RH</span>
+        </div>
+        <div class="metric-tile">
+          <span class="label">Gas Value</span>
+          <span class="value" id="val-gas">—</span>
+          <span class="unit">ADC</span>
+        </div>
+        <div class="metric-tile">
+          <span class="label">Diff (Gas − Base)</span>
+          <span class="value" id="val-diff">—</span>
+          <span class="unit">ADC</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CHARTS GRID ── -->
+    <div class="charts-grid grid grid-cols-1 md:grid-cols-3 gap-4">
+
+      <div class="chart-card">
+        <h3>🌡 Temperature (°C)</h3>
+        <canvas id="chart-temp" height="180"></canvas>
+      </div>
+
+      <div class="chart-card">
+        <h3>💧 Humidity (%RH)</h3>
+        <canvas id="chart-humid" height="180"></canvas>
+      </div>
+
+      <div class="chart-card">
+        <h3>🛢 Gas Value (ADC)</h3>
+        <canvas id="chart-gas" height="180"></canvas>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ══════════════════ AUDIO ══════════════════ -->
+  <!--
+    Place a file named "spoiled.mp3" in the same folder as this HTML.
+    The audio will loop while the status is SPOILED and stop otherwise.
+  -->
+  <audio id="spoiled-audio" src="spoiled.mp3" loop preload="none"></audio>
+
+
+  <!-- ══════════════════ JAVASCRIPT ══════════════════ -->
+  <script>
+    /* ─────────────────────────────────────────────────────
+       CONFIGURATION — edit these values to customise
+    ───────────────────────────────────────────────────── */
+    const CONFIG = {
+      firebaseUrl:    'https://onion-spoilage-default-rtdb.asia-southeast1.firebasedatabase.app/sensor_data.json',
+      fetchInterval:  5000,   // milliseconds between polls
+      maxDataPoints:  50,     // how many points to keep on each chart
+    };
+
+    /* ─────────────────────────────────────────────────────
+       SHARED STATE
+    ───────────────────────────────────────────────────── */
+    const dataBuffer = {
+      labels:      [],   // time strings  e.g. "14:03:22"
+      temperature: [],
+      humidity:    [],
+      gasValue:    [],
+    };
+
+    // Track last status to avoid replaying audio on unchanged state
+    let lastStatus = null;
+
+    /* ─────────────────────────────────────────────────────
+       CHART FACTORY — creates a Chart.js line chart
+       @param {string} canvasId  - <canvas> element id
+       @param {string} label     - dataset label
+       @param {string} color     - CSS colour string
+    ───────────────────────────────────────────────────── */
+    function makeChart(canvasId, label, color) {
+      const ctx = document.getElementById(canvasId).getContext('2d');
+
+      return new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: dataBuffer.labels,
+          datasets: [{
+            label,
+            data: [],            // filled dynamically
+            borderColor: color,
+            backgroundColor: color + '22',
+            borderWidth: 2,
+            pointRadius: 2,
+            pointHoverRadius: 5,
+            tension: 0.4,
+            fill: true,
+          }]
+        },
+        options: {
+          responsive: true,
+          animation: { duration: 300 },
+          scales: {
+            x: {
+              ticks: {
+                color: '#3a4d47',
+                font: { family: 'Space Mono', size: 9 },
+                maxTicksLimit: 8,
+                maxRotation: 0,
+              },
+              grid: { color: '#1e2b27' }
+            },
+            y: {
+              ticks: {
+                color: '#3a4d47',
+                font: { family: 'Space Mono', size: 9 },
+              },
+              grid: { color: '#1e2b27' }
+            }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#131918',
+              borderColor: '#1e2b27',
+              borderWidth: 1,
+              titleColor: '#d4e8e1',
+              bodyColor: '#3a4d47',
+              titleFont: { family: 'Space Mono' },
+              bodyFont:  { family: 'Space Mono' },
+            }
+          }
+        }
+      });
+    }
+
+    /* ─────────────────────────────────────────────────────
+       INITIALISE CHARTS
+    ───────────────────────────────────────────────────── */
+    const charts = {
+      temp:  makeChart('chart-temp',  'Temperature (°C)', '#22c987'),
+      humid: makeChart('chart-humid', 'Humidity (%RH)',   '#38bdf8'),
+      gas:   makeChart('chart-gas',   'Gas Value (ADC)',  '#f59e0b'),
+    };
+
+    /* ─────────────────────────────────────────────────────
+       PUSH DATA — adds a new reading to the buffer
+       and trims to CONFIG.maxDataPoints
+    ───────────────────────────────────────────────────── */
+    function pushData(reading) {
+      const now = new Date().toLocaleTimeString('en-GB');  // "HH:MM:SS"
+
+      dataBuffer.labels.push(now);
+      dataBuffer.temperature.push(reading.temperature);
+      dataBuffer.humidity.push(reading.humidity);
+      dataBuffer.gasValue.push(reading.gas_value);
+
+      // Keep only the last N points
+      const max = CONFIG.maxDataPoints;
+      if (dataBuffer.labels.length > max) {
+        dataBuffer.labels.shift();
+        dataBuffer.temperature.shift();
+        dataBuffer.humidity.shift();
+        dataBuffer.gasValue.shift();
+      }
+
+      // Sync chart datasets and re-render
+      charts.temp.data.datasets[0].data  = [...dataBuffer.temperature];
+      charts.humid.data.datasets[0].data = [...dataBuffer.humidity];
+      charts.gas.data.datasets[0].data   = [...dataBuffer.gasValue];
+
+      charts.temp.update();
+      charts.humid.update();
+      charts.gas.update();
+    }
+
+    /* ─────────────────────────────────────────────────────
+       UPDATE STATUS UI
+       status: "NO_ONIONS" | "FRESH" | "SPOILED"
+    ───────────────────────────────────────────────────── */
+    function updateStatus(reading) {
+      const status  = (reading.status || '').toUpperCase();
+      const card    = document.getElementById('status-card');
+      const badge   = document.getElementById('status-badge');
+      const badgeText = document.getElementById('status-text');
+      const banner  = document.getElementById('alert-banner');
+      const audio   = document.getElementById('spoiled-audio');
+
+      // ── Update metric display values ──
+      document.getElementById('val-temp').textContent  = parseFloat(reading.temperature).toFixed(1);
+      document.getElementById('val-humid').textContent = parseFloat(reading.humidity).toFixed(1);
+      document.getElementById('val-gas').textContent   = parseFloat(reading.gas_value).toFixed(0);
+      document.getElementById('val-diff').textContent  = parseFloat(reading.diff).toFixed(1);
+
+      // ── Update badge & card accent colour ──
+      badge.className = 'status-badge';   // reset classes
+      card.className  = 'status-card';
+
+      if (status === 'NO_ONIONS') {
+        badge.classList.add('badge-no-onion');
+        card.classList.add('no-onion');
+      } else if (status === 'FRESH') {
+        badge.classList.add('badge-fresh');
+        card.classList.add('fresh');
+      } else if (status === 'SPOILED') {
+        badge.classList.add('badge-spoiled');
+        card.classList.add('spoiled');
+      }
+
+      badgeText.textContent = status || '—';
+
+      // ── Alert banner ──
+      if (status === 'SPOILED') {
+        banner.classList.add('active');
+      } else {
+        banner.classList.remove('active');
+      }
+
+      // ── Audio: play only on SPOILED, stop otherwise ──
+      // Avoid restarting if status hasn't changed
+      if (status !== lastStatus) {
+        if (status === 'SPOILED') {
+          audio.play().catch(() => {
+            // Autoplay may be blocked until first user interaction — silently ignore
+            console.warn('Audio autoplay blocked. Click anywhere to enable.');
+          });
+        } else {
+          audio.pause();
+          audio.currentTime = 0;
+        }
+        lastStatus = status;
+      }
+    }
+
+    /* ─────────────────────────────────────────────────────
+       FETCH FROM FIREBASE REST API
+    ───────────────────────────────────────────────────── */
+    async function fetchData() {
+      try {
+        const response = await fetch(CONFIG.firebaseUrl);
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (!data) {
+          console.warn('Firebase returned null or empty data.');
+          return;
+        }
+
+        // Push to charts
+        pushData(data);
+
+        // Update status card
+        updateStatus(data);
+
+        // Update "last updated" timestamp in header
+        document.getElementById('last-updated').textContent =
+          'Last updated: ' + new Date().toLocaleTimeString('en-GB');
+
+      } catch (err) {
+        console.error('Fetch error:', err);
+        document.getElementById('last-updated').textContent = '⚠ Fetch failed — retrying...';
+      }
+    }
+
+    /* ─────────────────────────────────────────────────────
+       AUDIO: unlock on first user interaction
+       (required by most browsers for autoplay policy)
+    ───────────────────────────────────────────────────── */
+    document.addEventListener('click', () => {
+      const audio = document.getElementById('spoiled-audio');
+      // If status is currently SPOILED and audio isn't playing, try again
+      if (lastStatus === 'SPOILED' && audio.paused) {
+        audio.play().catch(() => {});
+      }
+    }, { once: false });
+
+    /* ─────────────────────────────────────────────────────
+       KICK OFF
+    ───────────────────────────────────────────────────── */
+    fetchData();                                          // immediate first fetch
+    setInterval(fetchData, CONFIG.fetchInterval);        // then repeat every N ms
+
+  </script>
+
+</body>
+</html>
